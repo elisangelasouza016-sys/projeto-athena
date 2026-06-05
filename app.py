@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 # Importações para Processamento de Documentos (CORRIGIDO PARA A VERSÃO ATUAL)
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -27,9 +27,14 @@ FAISS_INDEX_PATH = os.path.join(CACHE_DIR, "faiss_index")
 
 @st.cache_resource # Mantém o objeto FAISS carregado em memória na sessão do app
 def carregar_conhecimento():
+    # Inicializa o modelo de embeddings (all-MiniLM-L6-v2)
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     
-    # Se o cache do FAISS já existe localmente, carrega em milissegundos
+    # 1. Garantir que a pasta 'conhecimento' existe antes de qualquer verificação
+    if not os.path.exists("conhecimento"):
+        os.makedirs("conhecimento", exist_ok=True)
+    
+    # 2. Se o cache do FAISS já existe localmente, carrega em milissegundos
     if os.path.exists(FAISS_INDEX_PATH):
         try:
             vector_db = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
@@ -37,19 +42,21 @@ def carregar_conhecimento():
         except Exception as e:
             st.error(f"Erro ao carregar o cache do FAISS: {e}. Reconstruindo base...")
             
-    # Caso contrário, inicializa e indexa os arquivos da pasta 'conhecimento'
-    if not os.path.exists("conhecimento"):
-        os.makedirs("conhecimento")
+    # 3. Mapeamento nativo de arquivos para evitar falhas do DirectoryLoader no Linux/Streamlit Cloud
+    arquivos_pdf = [os.path.join("conhecimento", f) for f in os.listdir("conhecimento") if f.lower().endswith(".pdf")]
+    
+    if not arquivos_pdf:
+        # Se a pasta estiver vazia, retorna None (exibirá o aviso na barra lateral)
         return None, False
 
-    # Carregar PDFs
-  
-    loader = DirectoryLoader('./conhecimento', glob="**/*.pdf", loader_cls=PyPDFLoader)
-    try:
-        docs = loader.load()
-    except Exception as e:
-        st.error(f"Erro ao ler arquivos da pasta 'conhecimento': {e}")
-        return None, False
+    # 4. Carregar os documentos encontrados de forma iterativa e segura
+    docs = []
+    for arquivo in arquivos_pdf:
+        try:
+            loader = PyPDFLoader(arquivo)
+            docs.extend(loader.load())
+        except Exception as e:
+            st.error(f"Erro ao ler o arquivo específico {arquivo}: {e}")
         
     if not docs:
         return None, False
@@ -61,7 +68,7 @@ def carregar_conhecimento():
     # Criar Banco de Dados de busca (FAISS)
     try:
         vector_db = FAISS.from_documents(chunks, embeddings)
-        # Persistir fisicamente para acelerar os próximos carregamentos
+        # Persistir fisicamente para acelerar os próximos carregamentos no servidor
         os.makedirs(CACHE_DIR, exist_ok=True)
         vector_db.save_local(FAISS_INDEX_PATH)
         return vector_db, False # Retorna o banco e indica que foi gerado do zero
@@ -75,7 +82,7 @@ db, carregado_do_cache = carregar_conhecimento()
 # --- CONFIGURAÇÃO DA PÁGINA E ESTILO VISUAL PREMIUM ---
 st.set_page_config(page_title="Athena: Orientação e Direitos das Mulheres", page_icon="🏛️", layout="wide")
 
-# CSS Customizado para Estética Premium (Tons escuros, bronze, ouro e azul petróleo)
+# CSS Customizado para Estética Premium (Tons de roxo, lilás e lavanda)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;600;700&display=swap');
@@ -182,7 +189,7 @@ st.markdown("""
         transform: translateY(-1px);
     }
     
-    /* Card de Alerta/Emergência na Sidebar - Paleta Lilás/Rosa Suave e Texto de Alta Visibilidade */
+    /* Card de Alerta/Emergência na Sidebar - Paleta Lilás/Rosa Suave */
     .emergency-card {
         background: linear-gradient(135deg, #FFF1F2 0%, #FFE4E6 100%) !important;
         border: 1px solid #FDA4AF !important;
@@ -246,23 +253,26 @@ with st.sidebar:
     
     # Status da Base de Conhecimento RAG
     st.markdown("### Base de Conhecimento (RAG)")
-    if db:
-        # Obter arquivos na pasta
-        arquivos = [f for f in os.listdir("conhecimento") if f.endswith(".pdf")]
+    if db and os.path.exists("conhecimento"):
+        # Obter arquivos na pasta de forma limpa
+        arquivos = [f for f in os.listdir("conhecimento") if f.lower().endswith(".pdf")]
         num_arquivos = len(arquivos)
         
-        # Badge de status do cache
-        if carregado_do_cache:
-            st.markdown('<span class="status-badge status-badge-cache">⚡ Pronto (do cache)</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="status-badge">🟢 Pronto (indexado agora)</span>', unsafe_allow_html=True)
+        if num_arquivos > 0:
+            # Badge de status do cache
+            if carregado_do_cache:
+                st.markdown('<span class="status-badge status-badge-cache">⚡ Pronto (do cache)</span>', unsafe_allow_html=True)
+            else:
+                st.markdown('<span class="status-badge">🟢 Pronto (indexado agora)</span>', unsafe_allow_html=True)
+                
+            st.markdown(f"**{num_arquivos} documentos PDF** integrados com sucesso.")
             
-        st.markdown(f"**{num_arquivos} documentos PDF** integrados com sucesso.")
-        
-        # Lista expansível dos documentos
-        with st.expander("Ver arquivos indexados"):
-            for arq in arquivos:
-                st.markdown(f"- 📄 `{arq}`")
+            # Lista expansível dos documentos
+            with st.expander("Ver arquivos indexados"):
+                for arq in arquivos:
+                    st.markdown(f"- 📄 `{arq}`")
+        else:
+            st.markdown("⚠️ Nenhuma base de dados encontrada em `conhecimento/`.")
     else:
         st.markdown("⚠️ Nenhuma base de dados encontrada em `conhecimento/`.")
         
@@ -350,7 +360,7 @@ if prompt := st.chat_input("Sua pergunta sobre direitos, leis ou redes de apoio.
         contexto = "\n\n---\n\n".join([doc.page_content for doc in docs_ordenados])
 
     # --- GESTÃO DE MEMÓRIA (HISTÓRICO RECENTE) ---
-    # Extrair no máximo as últimas 3 trocas de turnos completas do histórico de mensagens anteriores
+    # Extrair no máximo as últimas 3 trocas de turnos completas
     historico_recente = st.session_state.messages[:-1]
     if len(historico_recente) > 6:
         historico_recente = historico_recente[-6:]
