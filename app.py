@@ -43,7 +43,8 @@ def carregar_conhecimento():
         return None, False
 
     # Carregar PDFs
-    loader = DirectoryLoader('conhecimento/', glob="*.pdf", loader_cls=PyPDFLoader)
+  
+    loader = DirectoryLoader('./conhecimento', glob="**/*.pdf", loader_cls=PyPDFLoader)
     try:
         docs = loader.load()
     except Exception as e:
