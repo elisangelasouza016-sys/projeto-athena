@@ -1,7 +1,9 @@
-pandas
-numpy
-scikit-learn
-joblib
 streamlit
-matplotlib
-seaborn
+requests
+python-dotenv
+langchain
+langchain-community
+langchain-text-splitters
+pypdf
+faiss-cpu
+sentence-transformers
